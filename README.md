@@ -1,5 +1,5 @@
 # 16GB High-Efficiency Splunk Detection Lab
-An optimized, resource-constrained home lab built to simulate enterprise threat detection, log analysis, and incident triage using a minimal hardware footprint.
+An optimized, resource-constrained home lab built to simulate enterprise threat detection, data model acceleration, and incident triage using a minimal hardware footprint.
 
 ## 🛠️ Environment Architecture & Specs
 *   **Host Machine:** Windows 10 Pro / Windows 11 Pro (16 GB RAM baseline)
@@ -16,13 +16,13 @@ An optimized, resource-constrained home lab built to simulate enterprise threat 
 ### 1. Anti-Proxy Brute Force Detection (MITRE ATT&CK T1110)
 *   **Data Source:** `WinEventLog:Security`
 *   **Target Telemetry:** Event ID 4625 (An account failed to log on)
-*   **Logic:** Tracks unique source IPs generating failed login attempts within a rolling window while filtering out empty properties.
+*   **Logic:** Tracks unique source IPs generating failed login attempts within a rolling window while filtering out empty system properties.
 
 ```splunk
-index=windows sourcetype="WinEventLog:Security" EventCode=4625 IpAddress!="-" 
+index=windows_logs sourcetype="WinEventLog:Security" EventCode=4625 IpAddress!="-" 
 
 | stats count, dc(IpAddress) as Unique_Proxies, values(IpAddress) as Attacking_IPs by Computer, TargetUserName 
-| where Unique_Proxies > 5 OR count > 20
+| where Unique_Proxies > 5 OR count > 20 
 | sort - count
 ```
 
@@ -32,7 +32,7 @@ index=windows sourcetype="WinEventLog:Security" EventCode=4625 IpAddress!="-"
 *   **Logic:** Isolates network logons (LogonType 3) and Remote Desktop connections (LogonType 10) while stripping out noisy automated machine accounts.
 
 ```splunk
-index=windows sourcetype="WinEventLog:Security" EventCode=4624 (LogonType=3 OR LogonType=10) TargetUserName!="*\$" 
+index=windows_logs sourcetype="WinEventLog:Security" EventCode=4624 (LogonType=3 OR LogonType=10) TargetUserName!="*\$" 
 
 | table _time, Computer, TargetUserName, TargetLogonId, IpAddress, LogonType 
 | sort - _time
@@ -44,17 +44,28 @@ index=windows sourcetype="WinEventLog:Security" EventCode=4624 (LogonType=3 OR L
 *   **Logic:** Uses case-insensitive string parsing to flag command shells explicitly spawned by high-risk parent applications like Office binaries or web servers.
 
 ```splunk
-index=windows sourcetype="XmlWinEventLog:Microsoft-Windows-Sysmon/Operational" EventCode=1 
+index=sysmon_telemetry sourcetype="XmlWinEventLog:Microsoft-Windows-Sysmon/Operational" EventCode=1 
 
 | eval ParentProcess=lower(mvindex(split(ParentImage, "\\"), -1)), ChildProcess=lower(mvindex(split(Image, "\\"), -1)) 
 | where ParentProcess IN ("w3wp.exe", "sqlservr.exe", "winword.exe", "excel.exe") 
 | table _time, Computer, ParentProcess, ChildProcess, CommandLine
 ```
 
+### 4. Enterprise-Scale Data Model Hunting Query
+*   **Data Model:** `Endpoint.Processes`
+*   **Logic:** Uses the accelerated Common Information Model (CIM) structures to instantly scan datasets for unsigned binaries executing from user temp folders without taxing raw index storage.
+
+```splunk
+
+| tstats `summarized_maps` count values(Processes.process_name) as process values(Processes.parent_process_name) as parent from datamodel=Endpoint.Processes where Processes.process_path="*\\AppData\\Local\\Temp\\*" 
+| rename Processes.* as * 
+| table _time, dest, user, parent, process, count
+```
+
 ---
 
 ## 📈 Key Technical Skills Demonstrated
-*   **SIEM Administration:** Installing Splunk, managing indexes, and configuring data inputs.
+*   **SIEM Administration:** Installing Splunk, managing index partitioning, and configuring data inputs.
 *   **Endpoint Hardening:** Deploying Microsoft Sysmon and configuring Group Policies for Command-Line Process Auditing (Event ID 4688).
-*   **Log Normalization:** Analyzing raw Windows event schemas and building memory-efficient Search Processing Language (SPL) queries.
+*   **Log Normalization & Optimization:** Aligning raw logs to the Splunk Common Information Model (CIM) and building memory-efficient data model acceleration pipelines.
 *   **Resource Management:** Tuning configurations to run security monitoring pipelines under strict 16GB RAM hardware constraints.
